@@ -3,13 +3,12 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Available LCD Screens</title>
+  <title>Ready Stock LCD Screens</title>
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="theme-color" content="#0f172a">
-  <link rel="manifest" href='data:application/manifest+json,{"name":"Screen Stock","short_name":"Stock","start_url":".","display":"standalone","background_color":"#f8fafc","theme_color":"#0f172a"}'>
+  <link rel="manifest" href='data:application/manifest+json,{"name":"Screen Catalog","short_name":"Screens","start_url":".","display":"standalone","background_color":"#f8fafc","theme_color":"#0f172a"}'>
   <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 <body class="bg-slate-100 text-slate-900 font-sans min-h-screen pb-16">
 
@@ -19,11 +18,9 @@
       <div class="flex items-center justify-between">
         <div>
           <h1 class="font-bold text-base md:text-lg tracking-tight">Ready Stock Screens</h1>
-          <p id="stats-label" class="text-xs text-slate-400">Loading live stock...</p>
+          <p id="stats-label" class="text-xs text-slate-400">Connecting to live catalog...</p>
         </div>
-        <span class="text-[11px] font-semibold text-emerald-400 bg-emerald-950/80 border border-emerald-800 px-2 py-0.5 rounded-full">
-          In Stock Only
-        </span>
+        <div id="auth-status-container"></div>
       </div>
 
       <!-- Search Input -->
@@ -47,136 +44,247 @@
 
   <!-- Main Content -->
   <main class="max-w-2xl mx-auto px-3 pt-4">
-    <!-- Loading State -->
+    <!-- Guest Notification -->
+    <div id="guest-banner" class="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-3 text-xs text-amber-800 flex items-center justify-between gap-2 hidden">
+      <div>
+        <span class="font-bold">Wholesale Portal:</span> Prices are restricted to registered technicians.
+      </div>
+      <button onclick="openLoginModal()" class="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white font-semibold rounded-lg whitespace-nowrap">
+        Login
+      </button>
+    </div>
+
+    <!-- Loading Spinner -->
     <div id="loading" class="text-center py-16 text-slate-500 text-sm space-y-2">
       <div class="inline-block animate-spin rounded-full h-8 w-8 border-4 border-blue-600 border-t-transparent"></div>
       <p>Fetching available items...</p>
     </div>
 
-    <!-- Fallback / Local Notice -->
-    <div id="error-box" class="hidden bg-white border border-amber-200 rounded-2xl p-6 text-center space-y-3 shadow-sm my-6">
-      <div class="text-amber-500 text-2xl font-bold">!</div>
-      <h2 class="font-bold text-slate-800">Could not read inventory file</h2>
-      <p class="text-xs text-slate-600 max-w-md mx-auto">
-        Ensure <code class="bg-slate-100 px-1 py-0.5 rounded text-slate-700">new_data.xlsx</code> exists in your repository root.
-      </p>
-      <div>
-        <label class="inline-block px-4 py-2 bg-blue-600 text-white text-xs font-semibold rounded-xl cursor-pointer hover:bg-blue-700 transition">
-          Select new_data.xlsx manually
-          <input type="file" id="manual-file" accept=".xlsx, .xls" class="hidden" onchange="handleManualFile(event)">
-        </label>
-      </div>
+    <!-- Error Box -->
+    <div id="error-box" class="hidden bg-white border border-rose-200 rounded-2xl p-6 text-center space-y-2 shadow-sm my-6">
+      <div class="text-rose-500 text-2xl font-bold">!</div>
+      <h2 class="font-bold text-slate-800">Connection Failed</h2>
+      <p id="error-message" class="text-xs text-slate-600 max-w-md mx-auto"></p>
     </div>
 
-    <!-- Cards Container -->
+    <!-- Product Cards -->
     <div id="catalog-container" class="space-y-3 hidden"></div>
 
-    <!-- Zero Results Found -->
+    <!-- No Match -->
     <div id="no-results" class="text-center py-16 text-slate-400 text-sm hidden space-y-1">
       <p class="font-semibold text-slate-600">No ready stock found for this query</p>
-      <p class="text-xs">Try searching by model number only (e.g., "14" or "Note 8").</p>
+      <p class="text-xs">Try searching by model number only (e.g., "14" or "31").</p>
     </div>
   </main>
 
+  <!-- Login Modal -->
+  <div id="login-modal" class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 hidden">
+    <div class="bg-white rounded-2xl p-6 max-w-sm w-full space-y-4 shadow-xl text-center">
+      <div class="w-12 h-12 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mx-auto text-xl font-bold">
+        📱
+      </div>
+      <div>
+        <h3 class="font-bold text-lg text-slate-900">Technician Login</h3>
+        <p class="text-xs text-slate-500 mt-1">Enter your 10-digit mobile number to view trade rates.</p>
+      </div>
+
+      <div class="space-y-2 text-left">
+        <div>
+          <label class="text-[11px] font-semibold text-slate-600">Mobile Number</label>
+          <input 
+            type="tel" 
+            id="login-phone" 
+            maxlength="10" 
+            placeholder="e.g. 9876543210" 
+            class="w-full text-base font-bold text-center tracking-wider py-2.5 px-3 bg-slate-50 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+        </div>
+        <p id="login-error" class="text-xs text-rose-500 hidden font-medium text-center"></p>
+      </div>
+
+      <div class="space-y-2 pt-1">
+        <button id="btn-submit-login" onclick="submitLogin()" class="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl text-sm transition">
+          Unlock Rates
+        </button>
+        <button onclick="requestAccessWhatsApp()" class="w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium rounded-xl text-xs transition">
+          New Shop? Request Registration
+        </button>
+        <button onclick="closeLoginModal()" class="w-full py-1 text-slate-400 text-xs">Cancel</button>
+      </div>
+    </div>
+  </div>
+
   <script>
-    let inStockInventory = [];
+    // ================= CONFIGURATION =================
+    const BACKEND_URL = "PASTE_YOUR_APPS_SCRIPT_WEB_APP_URL_HERE";
+    const SHOP_WHATSAPP_NUMBER = "919999999999"; // Enter your 10-digit number with 91 prefix
+    // =================================================
+
+    let inventoryData = [];
     let groupedData = [];
     let selectedBrand = 'ALL';
+    let currentUser = null;
 
-    function cleanString(val) {
-      if (val === undefined || val === null) return '';
-      return String(val).replace(/^\(|\)$/g, '').trim();
+    function initAuth() {
+      const stored = localStorage.getItem('tech_registered_user');
+      if (stored) {
+        try {
+          currentUser = JSON.parse(stored);
+          silentRevalidate(currentUser.phone);
+        } catch (e) {
+          currentUser = null;
+        }
+      }
+      updateAuthUI();
     }
 
-    async function loadExcel() {
+    function updateAuthUI() {
+      const container = document.getElementById('auth-status-container');
+      const banner = document.getElementById('guest-banner');
+
+      if (currentUser && currentUser.authorized) {
+        banner.classList.add('hidden');
+        container.innerHTML = `
+          <div class="flex items-center gap-1.5">
+            <span class="text-[11px] font-semibold text-emerald-400 bg-emerald-950/80 border border-emerald-800 px-2 py-0.5 rounded-full whitespace-nowrap">
+              ${currentUser.shop}
+            </span>
+            <button onclick="logout()" class="text-[10px] text-slate-400 underline ml-1">Exit</button>
+          </div>
+        `;
+      } else {
+        banner.classList.remove('hidden');
+        container.innerHTML = `
+          <button onclick="openLoginModal()" class="text-xs px-2.5 py-1 rounded-lg border border-slate-700 bg-slate-800 text-amber-400 font-semibold transition">
+            Unlock Rates 🔒
+          </button>
+        `;
+      }
+    }
+
+    async function silentRevalidate(phone) {
       try {
-        const response = await fetch('new_data.xlsx?v=' + Date.now());
-        if (!response.ok) throw new Error('Cannot access file via HTTP');
-        const buffer = await response.arrayBuffer();
-        parseWorkbook(buffer);
+        const res = await fetch(`${BACKEND_URL}?action=auth&phone=${encodeURIComponent(phone)}`);
+        const result = await res.json();
+        if (!result.success) {
+          logout();
+        }
+      } catch (err) {
+        // Keep offline cached credentials active on temporary connection drops
+      }
+    }
+
+    function openLoginModal() {
+      document.getElementById('login-error').classList.add('hidden');
+      document.getElementById('login-phone').value = '';
+      document.getElementById('login-modal').classList.remove('hidden');
+    }
+
+    function closeLoginModal() {
+      document.getElementById('login-modal').classList.add('hidden');
+    }
+
+    async function submitLogin() {
+      const phoneInput = document.getElementById('login-phone').value.trim();
+      const errorLabel = document.getElementById('login-error');
+      const btn = document.getElementById('btn-submit-login');
+
+      if (!phoneInput || phoneInput.length < 10) {
+        errorLabel.innerText = "Please enter a valid 10-digit phone number.";
+        errorLabel.classList.remove('hidden');
+        return;
+      }
+
+      btn.disabled = true;
+      btn.innerText = "Verifying...";
+
+      try {
+        const res = await fetch(`${BACKEND_URL}?action=auth&phone=${encodeURIComponent(phoneInput)}`);
+        const result = await res.json();
+
+        if (result.success) {
+          currentUser = { 
+            phone: result.phone, 
+            shop: result.shop, 
+            authorized: true 
+          };
+          localStorage.setItem('tech_registered_user', JSON.stringify(currentUser));
+          closeLoginModal();
+          updateAuthUI();
+          renderCatalog();
+        } else {
+          errorLabel.innerText = result.message || "Number not found in authorized technician list.";
+          errorLabel.classList.remove('hidden');
+        }
+      } catch (err) {
+        errorLabel.innerText = "Network error. Please try again.";
+        errorLabel.classList.remove('hidden');
+      } finally {
+        btn.disabled = false;
+        btn.innerText = "Unlock Rates";
+      }
+    }
+
+    function logout() {
+      localStorage.removeItem('tech_registered_user');
+      currentUser = null;
+      updateAuthUI();
+      renderCatalog();
+    }
+
+    function requestAccessWhatsApp() {
+      const msg = encodeURIComponent("Hi, I want wholesale screen price access for my repair shop:\n\nShop Name:\nMobile Number:\nAddress / Location:");
+      window.open(`https://wa.me/${SHOP_WHATSAPP_NUMBER}?text=${msg}`, '_blank');
+    }
+
+    async function loadCatalog() {
+      try {
+        const response = await fetch(`${BACKEND_URL}?action=getData`);
+        const json = await response.json();
+
+        if (!json.success || !json.data) {
+          throw new Error(json.error || "Inventory unavailable");
+        }
+
+        inventoryData = json.data;
+        groupCatalogData();
+        renderBrandChips();
+        renderCatalog();
+
+        document.getElementById('loading').classList.add('hidden');
+        document.getElementById('catalog-container').classList.remove('hidden');
+        document.getElementById('stats-label').innerText = `${groupedData.length} Models (${inventoryData.length} SKUs in stock)`;
       } catch (err) {
         document.getElementById('loading').classList.add('hidden');
+        document.getElementById('error-message').innerText = err.message;
         document.getElementById('error-box').classList.remove('hidden');
       }
     }
 
-    function handleManualFile(event) {
-      const file = event.target.files[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        parseWorkbook(e.target.result);
-        document.getElementById('error-box').classList.add('hidden');
-      };
-      reader.readAsArrayBuffer(file);
-    }
-
-    function parseWorkbook(buffer) {
-      const workbook = XLSX.read(buffer, { type: 'array' });
-      const sheetName = workbook.SheetNames[0];
-      const sheet = workbook.Sheets[sheetName];
-      const jsonRows = XLSX.utils.sheet_to_json(sheet);
-
-      // Filter: STRICTLY keep rows with STOCK > 0
-      inStockInventory = jsonRows.map(row => {
-        const company = cleanString(row['UFCOMPANY'] || row['Company'] || 'Other');
-        const item = String(row['ITEMNAME'] || row['Item'] || '').trim();
-        const type = cleanString(row['UFTYPE']);
-        const brand = cleanString(row['UFBRAND']);
-        const price = Number(row['SALESPRICE'] || row['Price'] || 0);
-        const stock = Number(row['STOCK'] || 0);
-
-        let variantName = [type, brand].filter(Boolean).join(' - ');
-        if (!variantName) variantName = 'Standard Grade';
-
-        return { company, item, variantName, price, stock };
-      }).filter(r => r.item !== '' && r.stock > 0);
-
-      groupCatalogData();
-      renderBrandChips();
-      renderCatalog();
-
-      document.getElementById('loading').classList.add('hidden');
-      document.getElementById('catalog-container').classList.remove('hidden');
-      document.getElementById('stats-label').innerText = `${groupedData.length} Models Available (${inStockInventory.length} SKUs in stock)`;
-    }
-
     function groupCatalogData() {
-      const groupMap = new Map();
-
-      inStockInventory.forEach(row => {
-        const key = `${row.company}:::${row.item}`;
-        if (!groupMap.has(key)) {
-          groupMap.set(key, {
-            company: row.company,
-            item: row.item,
-            variants: []
-          });
+      const map = new Map();
+      inventoryData.forEach(row => {
+        const key = `${row.c}:::${row.i}`;
+        if (!map.has(key)) {
+          map.set(key, { company: row.c, item: row.i, variants: [] });
         }
-        groupMap.get(key).variants.push({
-          name: row.variantName,
-          price: row.price,
-          stock: row.stock
-        });
+        map.get(key).variants.push({ name: row.v, price: row.p, stock: row.s });
       });
 
-      // Sort variants by lowest price first
-      groupedData = Array.from(groupMap.values()).map(group => {
+      groupedData = Array.from(map.values()).map(group => {
         group.variants.sort((a, b) => a.price - b.price);
         return group;
       });
     }
 
     function renderBrandChips() {
-      const companyCounts = {};
-      inStockInventory.forEach(i => { companyCounts[i.company] = (companyCounts[i.company] || 0) + 1; });
+      const counts = {};
+      inventoryData.forEach(i => { counts[i.c] = (counts[i.c] || 0) + 1; });
+      const sorted = ['ALL', ...Object.keys(counts).sort((a, b) => counts[b] - counts[a])];
 
-      const sortedBrands = ['ALL', ...Object.keys(companyCounts).sort((a, b) => companyCounts[b] - companyCounts[a])];
-      const container = document.getElementById('brand-chips');
-      
-      container.innerHTML = sortedBrands.map(b => `
+      document.getElementById('brand-chips').innerHTML = sorted.map(b => `
         <button onclick="selectBrand('${b}')" class="px-3 py-1 rounded-full border border-slate-700 bg-slate-800 text-slate-300 font-medium whitespace-nowrap brand-btn ${b === selectedBrand ? 'bg-blue-600 text-white border-blue-600' : ''}">
-          ${b === 'ALL' ? 'All' : b} (${companyCounts[b] || inStockInventory.length})
+          ${b === 'ALL' ? 'All' : b} (${counts[b] || inventoryData.length})
         </button>
       `).join('');
     }
@@ -188,32 +296,28 @@
     }
 
     function clearSearch() {
-      const input = document.getElementById('search-input');
-      input.value = '';
+      document.getElementById('search-input').value = '';
       document.getElementById('clear-search').classList.add('hidden');
       renderCatalog();
     }
 
     function renderCatalog() {
-      const input = document.getElementById('search-input');
-      const rawQuery = input.value.trim().toLowerCase();
+      const rawQuery = document.getElementById('search-input').value.trim().toLowerCase();
       const cleanQuery = rawQuery.replace(/[\s\-\/\+\(\)]/g, '');
-      
       document.getElementById('clear-search').classList.toggle('hidden', rawQuery === '');
 
       const container = document.getElementById('catalog-container');
       const noResults = document.getElementById('no-results');
+      const isAuthed = currentUser && currentUser.authorized;
 
       const filtered = groupedData.filter(group => {
         const matchesBrand = selectedBrand === 'ALL' || group.company.toLowerCase() === selectedBrand.toLowerCase();
         if (!matchesBrand) return false;
-
         if (!cleanQuery) return true;
 
-        const normalizedModel = group.item.toLowerCase().replace(/[\s\-\/\+\(\)]/g, '');
-        const normalizedCompany = group.company.toLowerCase().replace(/[\s\-\/\+\(\)]/g, '');
-
-        return normalizedModel.includes(cleanQuery) || (normalizedCompany + normalizedModel).includes(cleanQuery);
+        const normModel = group.item.toLowerCase().replace(/[\s\-\/\+\(\)]/g, '');
+        const normComp = group.company.toLowerCase().replace(/[\s\-\/\+\(\)]/g, '');
+        return normModel.includes(cleanQuery) || (normComp + normModel).includes(cleanQuery);
       });
 
       if (filtered.length === 0) {
@@ -243,7 +347,12 @@
                   <div class="text-[11px] text-emerald-600 font-medium">Available: ${v.stock} pcs</div>
                 </div>
                 <div class="text-right">
-                  <div class="font-bold text-slate-900 text-sm md:text-base">₹${v.price}</div>
+                  ${isAuthed 
+                    ? `<div class="font-bold text-slate-900 text-sm md:text-base">₹${v.price}</div>`
+                    : `<button onclick="openLoginModal()" class="text-xs font-semibold text-amber-600 bg-amber-50 hover:bg-amber-100 border border-amber-200 px-2.5 py-1 rounded-lg">
+                        🔒 Login to View
+                       </button>`
+                  }
                 </div>
               </div>
             `).join('')}
@@ -253,7 +362,10 @@
     }
 
     document.getElementById('search-input').addEventListener('input', renderCatalog);
-    window.addEventListener('DOMContentLoaded', loadExcel);
+    window.addEventListener('DOMContentLoaded', () => {
+      initAuth();
+      loadCatalog();
+    });
   </script>
 </body>
 </html>
