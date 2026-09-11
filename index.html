@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LCD Screen Price & Stock Portal</title>
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="theme-color" content="#1e293b">
+  <link rel="manifest" href='data:application/manifest+json,{"name":"LCD Price Portal","short_name":"ScreenPrices","start_url":".","display":"standalone","background_color":"#f8fafc","theme_color":"#1e293b"}'>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body class="bg-slate-100 text-slate-900 font-sans min-h-screen pb-16">
+
+  <!-- Sticky Header -->
+  <header class="sticky top-0 z-30 bg-slate-900 text-white px-4 py-3 shadow-md">
+    <div class="max-w-2xl mx-auto space-y-3">
+      <div class="flex items-center justify-between">
+        <div>
+          <h1 class="font-bold text-base md:text-lg tracking-tight">LCD Spare Parts Catalog</h1>
+          <p id="stats-label" class="text-xs text-slate-400">Loading inventory data...</p>
+        </div>
+        <button id="in-stock-toggle" onclick="toggleStockFilter()" class="text-xs px-2.5 py-1 rounded-lg border border-slate-700 bg-slate-800 text-slate-300 transition">
+          In Stock Only: <span id="stock-filter-status" class="font-bold text-amber-400">OFF</span>
+        </button>
+      </div>
+
+      <!-- Search Input -->
+      <div class="relative">
+        <input 
+          type="text" 
+          id="search-input" 
+          placeholder="Search model (e.g., M31, A14, 11 Pro, Note 10)..." 
+          class="w-full pl-3 pr-9 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-sm text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
+          autocomplete="off"
+        >
+        <button id="clear-search" onclick="clearSearch()" class="absolute right-3 top-2.5 text-slate-400 hover:text-white hidden text-sm font-bold">✕</button>
+      </div>
+
+      <!-- Brand Chips -->
+      <div id="brand-chips" class="flex gap-2 overflow-x-auto pb-1 text-xs no-scrollbar">
+        <button onclick="selectBrand('ALL')" class="px-3 py-1 rounded-full bg-blue-600 text-white font-medium whitespace-nowrap brand-btn active">All Brands</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Display Area -->
+  <main class="max-w-2xl mx-auto px-3 pt-4">
+    <!-- Loading State -->
+    <div id="loading" class="text-center py-16 text-slate-500 text-sm space-y-2">
+      <div class="inline-block animate-spin rounded-full h-8 w-8 border-4 border-blue-600 border-t-transparent"></div>
+      <p>Reading <code class="font-mono text-xs bg-slate-200 px-1 py-0.5 rounded">new_data.xlsx</code>...</p>
+    </div>
+
+    <!-- Error / Local Fallback Upload -->
+    <div id="error-box" class="hidden bg-white border border-amber-200 rounded-2xl p-6 text-center space-y-3 shadow-sm my-6">
+      <div class="text-amber-500 text-2xl font-bold">!</div>
+      <h2 class="font-bold text-slate-800">Auto-Load Notice</h2>
+      <p class="text-xs text-slate-600 max-w-md mx-auto">
+        If you are opening this file locally on your computer, browser security prevents reading the Excel file automatically. Select the file manually below, or host it on GitHub Pages for automatic loading.
+      </p>
+      <div>
+        <label class="inline-block px-4 py-2 bg-blue-600 text-white text-xs font-semibold rounded-xl cursor-pointer hover:bg-blue-700 transition">
+          Select new_data.xlsx
+          <input type="file" id="manual-file" accept=".xlsx, .xls" class="hidden" onchange="handleManualFile(event)">
+        </label>
+      </div>
+    </div>
+
+    <!-- Cards List -->
+    <div id="catalog-container" class="space-y-3 hidden"></div>
+
+    <!-- Zero Results -->
+    <div id="no-results" class="text-center py-16 text-slate-400 text-sm hidden space-y-1">
+      <p class="font-semibold text-slate-600">No matching screens found</p>
+      <p class="text-xs">Try searching just the number (e.g., "31" instead of "Galaxy M31").</p>
+    </div>
+  </main>
+
+  <script>
+    let rawInventory = [];
+    let groupedData = [];
+    let selectedBrand = 'ALL';
+    let onlyInStock = false;
+
+    function cleanString(val) {
+      if (val === undefined || val === null) return '';
+      return String(val).replace(/^\(|\)$/g, '').trim();
+    }
+
+    async function loadExcelFromFolder() {
+      try {
+        const response = await fetch('new_data.xlsx?v=' + Date.now());
+        if (!response.ok) throw new Error('File not accessible via HTTP');
+        const buffer = await response.arrayBuffer();
+        parseWorkbook(buffer);
+      } catch (err) {
+        document.getElementById('loading').classList.add('hidden');
+        document.getElementById('error-box').classList.remove('hidden');
+      }
+    }
+
+    function handleManualFile(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        parseWorkbook(e.target.result);
+        document.getElementById('error-box').classList.add('hidden');
+      };
+      reader.readAsArrayBuffer(file);
+    }
+
+    function parseWorkbook(buffer) {
+      const workbook = XLSX.read(buffer, { type: 'array' });
+      const sheetName = workbook.SheetNames[0];
+      const sheet = workbook.Sheets[sheetName];
+      const jsonRows = XLSX.utils.sheet_to_json(sheet);
+
+      rawInventory = jsonRows.map(row => {
+        const company = cleanString(row['UFCOMPANY'] || row['Company'] || 'Other');
+        const item = String(row['ITEMNAME'] || row['Item'] || '').trim();
+        const type = cleanString(row['UFTYPE']);
+        const brand = cleanString(row['UFBRAND']);
+        const price = Number(row['SALESPRICE'] || row['Price'] || 0);
+        const stock = Number(row['STOCK'] || 0);
+
+        let variantName = [type, brand].filter(Boolean).join(' - ');
+        if (!variantName) variantName = 'Standard Grade';
+
+        return { company, item, variantName, price, stock };
+      }).filter(r => r.item !== '');
+
+      groupCatalogData();
+      renderBrandChips();
+      renderCatalog();
+
+      document.getElementById('loading').classList.add('hidden');
+      document.getElementById('catalog-container').classList.remove('hidden');
+      document.getElementById('stats-label').innerText = `${groupedData.length} Models | ${rawInventory.length} Total SKUs`;
+    }
+
+    function groupCatalogData() {
+      const groupMap = new Map();
+
+      rawInventory.forEach(row => {
+        const key = `${row.company}:::${row.item}`;
+        if (!groupMap.has(key)) {
+          groupMap.set(key, {
+            company: row.company,
+            item: row.item,
+            variants: []
+          });
+        }
+        groupMap.get(key).variants.push({
+          name: row.variantName,
+          price: row.price,
+          stock: row.stock
+        });
+      });
+
+      groupedData = Array.from(groupMap.values()).map(group => {
+        group.variants.sort((a, b) => {
+          if ((a.stock > 0) && (b.stock <= 0)) return -1;
+          if ((a.stock <= 0) && (b.stock > 0)) return 1;
+          return a.price - b.price;
+        });
+        group.hasStock = group.variants.some(v => v.stock > 0);
+        return group;
+      });
+    }
+
+    function renderBrandChips() {
+      const companyCounts = {};
+      rawInventory.forEach(i => { companyCounts[i.company] = (companyCounts[i.company] || 0) + 1; });
+
+      const sortedBrands = ['ALL', ...Object.keys(companyCounts).sort((a, b) => companyCounts[b] - companyCounts[a])];
+      const container = document.getElementById('brand-chips');
+      
+      container.innerHTML = sortedBrands.map(b => `
+        <button onclick="selectBrand('${b}')" class="px-3 py-1 rounded-full border border-slate-700 bg-slate-800 text-slate-300 font-medium whitespace-nowrap brand-btn ${b === selectedBrand ? 'bg-blue-600 text-white border-blue-600' : ''}">
+          ${b === 'ALL' ? 'All Brands' : b}
+        </button>
+      `).join('');
+    }
+
+    function selectBrand(brand) {
+      selectedBrand = brand;
+      renderBrandChips();
+      renderCatalog();
+    }
+
+    function toggleStockFilter() {
+      onlyInStock = !onlyInStock;
+      const label = document.getElementById('stock-filter-status');
+      label.innerText = onlyInStock ? 'ON' : 'OFF';
+      label.className = onlyInStock ? 'font-bold text-emerald-400' : 'font-bold text-amber-400';
+      renderCatalog();
+    }
+
+    function clearSearch() {
+      const input = document.getElementById('search-input');
+      input.value = '';
+      document.getElementById('clear-search').classList.add('hidden');
+      renderCatalog();
+    }
+
+    function renderCatalog() {
+      const input = document.getElementById('search-input');
+      const rawQuery = input.value.trim().toLowerCase();
+      const cleanQuery = rawQuery.replace(/[\s\-\/\+\(\)]/g, '');
+      
+      document.getElementById('clear-search').classList.toggle('hidden', rawQuery === '');
+
+      const container = document.getElementById('catalog-container');
+      const noResults = document.getElementById('no-results');
+
+      const filtered = groupedData.filter(group => {
+        const matchesBrand = selectedBrand === 'ALL' || group.company.toLowerCase() === selectedBrand.toLowerCase();
+        if (!matchesBrand) return false;
+        if (onlyInStock && !group.hasStock) return false;
+
+        if (!cleanQuery) return true;
+
+        const normalizedModel = group.item.toLowerCase().replace(/[\s\-\/\+\(\)]/g, '');
+        const normalizedCompany = group.company.toLowerCase().replace(/[\s\-\/\+\(\)]/g, '');
+
+        return normalizedModel.includes(cleanQuery) || (normalizedCompany + normalizedModel).includes(cleanQuery);
+      });
+
+      if (filtered.length === 0) {
+        container.innerHTML = '';
+        noResults.classList.remove('hidden');
+        return;
+      }
+
+      noResults.classList.add('hidden');
+      container.innerHTML = filtered.map(group => `
+        <div class="bg-white border border-slate-200 rounded-xl p-3.5 shadow-sm space-y-2.5">
+          <div class="flex items-start justify-between gap-2 border-b border-slate-100 pb-2">
+            <div>
+              <span class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 bg-slate-100 text-slate-700 rounded-md">${group.company}</span>
+              <h2 class="font-bold text-sm md:text-base text-slate-900 mt-1 leading-snug">${group.item}</h2>
+            </div>
+            ${group.hasStock 
+              ? '<span class="text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full whitespace-nowrap">In Stock</span>'
+              : '<span class="text-[11px] font-semibold text-slate-400 bg-slate-50 border border-slate-200 px-2 py-0.5 rounded-full whitespace-nowrap">Out of Stock</span>'}
+          </div>
+
+          <div class="divide-y divide-slate-100">
+            ${group.variants.map(v => `
+              <div class="py-2 flex items-center justify-between text-xs md:text-sm">
+                <div class="pr-2">
+                  <div class="font-semibold text-slate-800">${v.name}</div>
+                  <div class="text-[11px] ${v.stock > 0 ? 'text-emerald-600 font-medium' : 'text-slate-400'}">
+                    ${v.stock > 0 ? `Stock: ${v.stock} pcs` : 'Unavailable'}
+                  </div>
+                </div>
+                <div class="text-right">
+                  <div class="font-bold text-slate-900 text-sm md:text-base">₹${v.price}</div>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      `).join('');
+    }
+
+    document.getElementById('search-input').addEventListener('input', renderCatalog);
+    window.addEventListener('DOMContentLoaded', loadExcelFromFolder);
+  </script>
+</body>
+</html>
