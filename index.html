@@ -3,11 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>LCD Screen Price & Stock Portal</title>
+  <title>Available LCD Screens</title>
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="theme-color" content="#1e293b">
-  <link rel="manifest" href='data:application/manifest+json,{"name":"LCD Price Portal","short_name":"ScreenPrices","start_url":".","display":"standalone","background_color":"#f8fafc","theme_color":"#1e293b"}'>
+  <meta name="theme-color" content="#0f172a">
+  <link rel="manifest" href='data:application/manifest+json,{"name":"Screen Stock","short_name":"Stock","start_url":".","display":"standalone","background_color":"#f8fafc","theme_color":"#0f172a"}'>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
@@ -18,12 +18,12 @@
     <div class="max-w-2xl mx-auto space-y-3">
       <div class="flex items-center justify-between">
         <div>
-          <h1 class="font-bold text-base md:text-lg tracking-tight">LCD Spare Parts Catalog</h1>
-          <p id="stats-label" class="text-xs text-slate-400">Loading inventory data...</p>
+          <h1 class="font-bold text-base md:text-lg tracking-tight">Ready Stock Screens</h1>
+          <p id="stats-label" class="text-xs text-slate-400">Loading live stock...</p>
         </div>
-        <button id="in-stock-toggle" onclick="toggleStockFilter()" class="text-xs px-2.5 py-1 rounded-lg border border-slate-700 bg-slate-800 text-slate-300 transition">
-          In Stock Only: <span id="stock-filter-status" class="font-bold text-amber-400">OFF</span>
-        </button>
+        <span class="text-[11px] font-semibold text-emerald-400 bg-emerald-950/80 border border-emerald-800 px-2 py-0.5 rounded-full">
+          In Stock Only
+        </span>
       </div>
 
       <!-- Search Input -->
@@ -45,54 +45,53 @@
     </div>
   </header>
 
-  <!-- Main Display Area -->
+  <!-- Main Content -->
   <main class="max-w-2xl mx-auto px-3 pt-4">
     <!-- Loading State -->
     <div id="loading" class="text-center py-16 text-slate-500 text-sm space-y-2">
       <div class="inline-block animate-spin rounded-full h-8 w-8 border-4 border-blue-600 border-t-transparent"></div>
-      <p>Reading <code class="font-mono text-xs bg-slate-200 px-1 py-0.5 rounded">new_data.xlsx</code>...</p>
+      <p>Fetching available items...</p>
     </div>
 
-    <!-- Error / Local Fallback Upload -->
+    <!-- Fallback / Local Notice -->
     <div id="error-box" class="hidden bg-white border border-amber-200 rounded-2xl p-6 text-center space-y-3 shadow-sm my-6">
       <div class="text-amber-500 text-2xl font-bold">!</div>
-      <h2 class="font-bold text-slate-800">Auto-Load Notice</h2>
+      <h2 class="font-bold text-slate-800">Could not read inventory file</h2>
       <p class="text-xs text-slate-600 max-w-md mx-auto">
-        If you are opening this file locally on your computer, browser security prevents reading the Excel file automatically. Select the file manually below, or host it on GitHub Pages for automatic loading.
+        Ensure <code class="bg-slate-100 px-1 py-0.5 rounded text-slate-700">new_data.xlsx</code> exists in your repository root.
       </p>
       <div>
         <label class="inline-block px-4 py-2 bg-blue-600 text-white text-xs font-semibold rounded-xl cursor-pointer hover:bg-blue-700 transition">
-          Select new_data.xlsx
+          Select new_data.xlsx manually
           <input type="file" id="manual-file" accept=".xlsx, .xls" class="hidden" onchange="handleManualFile(event)">
         </label>
       </div>
     </div>
 
-    <!-- Cards List -->
+    <!-- Cards Container -->
     <div id="catalog-container" class="space-y-3 hidden"></div>
 
-    <!-- Zero Results -->
+    <!-- Zero Results Found -->
     <div id="no-results" class="text-center py-16 text-slate-400 text-sm hidden space-y-1">
-      <p class="font-semibold text-slate-600">No matching screens found</p>
-      <p class="text-xs">Try searching just the number (e.g., "31" instead of "Galaxy M31").</p>
+      <p class="font-semibold text-slate-600">No ready stock found for this query</p>
+      <p class="text-xs">Try searching by model number only (e.g., "14" or "Note 8").</p>
     </div>
   </main>
 
   <script>
-    let rawInventory = [];
+    let inStockInventory = [];
     let groupedData = [];
     let selectedBrand = 'ALL';
-    let onlyInStock = false;
 
     function cleanString(val) {
       if (val === undefined || val === null) return '';
       return String(val).replace(/^\(|\)$/g, '').trim();
     }
 
-    async function loadExcelFromFolder() {
+    async function loadExcel() {
       try {
         const response = await fetch('new_data.xlsx?v=' + Date.now());
-        if (!response.ok) throw new Error('File not accessible via HTTP');
+        if (!response.ok) throw new Error('Cannot access file via HTTP');
         const buffer = await response.arrayBuffer();
         parseWorkbook(buffer);
       } catch (err) {
@@ -118,7 +117,8 @@
       const sheet = workbook.Sheets[sheetName];
       const jsonRows = XLSX.utils.sheet_to_json(sheet);
 
-      rawInventory = jsonRows.map(row => {
+      // Filter: STRICTLY keep rows with STOCK > 0
+      inStockInventory = jsonRows.map(row => {
         const company = cleanString(row['UFCOMPANY'] || row['Company'] || 'Other');
         const item = String(row['ITEMNAME'] || row['Item'] || '').trim();
         const type = cleanString(row['UFTYPE']);
@@ -130,7 +130,7 @@
         if (!variantName) variantName = 'Standard Grade';
 
         return { company, item, variantName, price, stock };
-      }).filter(r => r.item !== '');
+      }).filter(r => r.item !== '' && r.stock > 0);
 
       groupCatalogData();
       renderBrandChips();
@@ -138,13 +138,13 @@
 
       document.getElementById('loading').classList.add('hidden');
       document.getElementById('catalog-container').classList.remove('hidden');
-      document.getElementById('stats-label').innerText = `${groupedData.length} Models | ${rawInventory.length} Total SKUs`;
+      document.getElementById('stats-label').innerText = `${groupedData.length} Models Available (${inStockInventory.length} SKUs in stock)`;
     }
 
     function groupCatalogData() {
       const groupMap = new Map();
 
-      rawInventory.forEach(row => {
+      inStockInventory.forEach(row => {
         const key = `${row.company}:::${row.item}`;
         if (!groupMap.has(key)) {
           groupMap.set(key, {
@@ -160,27 +160,23 @@
         });
       });
 
+      // Sort variants by lowest price first
       groupedData = Array.from(groupMap.values()).map(group => {
-        group.variants.sort((a, b) => {
-          if ((a.stock > 0) && (b.stock <= 0)) return -1;
-          if ((a.stock <= 0) && (b.stock > 0)) return 1;
-          return a.price - b.price;
-        });
-        group.hasStock = group.variants.some(v => v.stock > 0);
+        group.variants.sort((a, b) => a.price - b.price);
         return group;
       });
     }
 
     function renderBrandChips() {
       const companyCounts = {};
-      rawInventory.forEach(i => { companyCounts[i.company] = (companyCounts[i.company] || 0) + 1; });
+      inStockInventory.forEach(i => { companyCounts[i.company] = (companyCounts[i.company] || 0) + 1; });
 
       const sortedBrands = ['ALL', ...Object.keys(companyCounts).sort((a, b) => companyCounts[b] - companyCounts[a])];
       const container = document.getElementById('brand-chips');
       
       container.innerHTML = sortedBrands.map(b => `
         <button onclick="selectBrand('${b}')" class="px-3 py-1 rounded-full border border-slate-700 bg-slate-800 text-slate-300 font-medium whitespace-nowrap brand-btn ${b === selectedBrand ? 'bg-blue-600 text-white border-blue-600' : ''}">
-          ${b === 'ALL' ? 'All Brands' : b}
+          ${b === 'ALL' ? 'All' : b} (${companyCounts[b] || inStockInventory.length})
         </button>
       `).join('');
     }
@@ -188,14 +184,6 @@
     function selectBrand(brand) {
       selectedBrand = brand;
       renderBrandChips();
-      renderCatalog();
-    }
-
-    function toggleStockFilter() {
-      onlyInStock = !onlyInStock;
-      const label = document.getElementById('stock-filter-status');
-      label.innerText = onlyInStock ? 'ON' : 'OFF';
-      label.className = onlyInStock ? 'font-bold text-emerald-400' : 'font-bold text-amber-400';
       renderCatalog();
     }
 
@@ -219,7 +207,6 @@
       const filtered = groupedData.filter(group => {
         const matchesBrand = selectedBrand === 'ALL' || group.company.toLowerCase() === selectedBrand.toLowerCase();
         if (!matchesBrand) return false;
-        if (onlyInStock && !group.hasStock) return false;
 
         if (!cleanQuery) return true;
 
@@ -243,9 +230,9 @@
               <span class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 bg-slate-100 text-slate-700 rounded-md">${group.company}</span>
               <h2 class="font-bold text-sm md:text-base text-slate-900 mt-1 leading-snug">${group.item}</h2>
             </div>
-            ${group.hasStock 
-              ? '<span class="text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full whitespace-nowrap">In Stock</span>'
-              : '<span class="text-[11px] font-semibold text-slate-400 bg-slate-50 border border-slate-200 px-2 py-0.5 rounded-full whitespace-nowrap">Out of Stock</span>'}
+            <span class="text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full whitespace-nowrap">
+              Ready Stock
+            </span>
           </div>
 
           <div class="divide-y divide-slate-100">
@@ -253,9 +240,7 @@
               <div class="py-2 flex items-center justify-between text-xs md:text-sm">
                 <div class="pr-2">
                   <div class="font-semibold text-slate-800">${v.name}</div>
-                  <div class="text-[11px] ${v.stock > 0 ? 'text-emerald-600 font-medium' : 'text-slate-400'}">
-                    ${v.stock > 0 ? `Stock: ${v.stock} pcs` : 'Unavailable'}
-                  </div>
+                  <div class="text-[11px] text-emerald-600 font-medium">Available: ${v.stock} pcs</div>
                 </div>
                 <div class="text-right">
                   <div class="font-bold text-slate-900 text-sm md:text-base">₹${v.price}</div>
@@ -268,7 +253,7 @@
     }
 
     document.getElementById('search-input').addEventListener('input', renderCatalog);
-    window.addEventListener('DOMContentLoaded', loadExcelFromFolder);
+    window.addEventListener('DOMContentLoaded', loadExcel);
   </script>
 </body>
 </html>
